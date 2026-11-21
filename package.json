@@ -1,0 +1,71 @@
+{
+  "name": "@karoy/dsh-wsl-desktop",
+  "version": "0.3.1",
+  "description": "Install and launch a DSH Desktop copy whose Electron shell proxies its Host connection to a DSH Host running inside WSL",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "wsl",
+    "desktop",
+    "proxy",
+    "windows"
+  ],
+  "private": false,
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lunnlew/dsh-wsl-desktop.git"
+  },
+  "homepage": "https://github.com/lunnlew/dsh-wsl-desktop#readme",
+  "bugs": {
+    "url": "https://github.com/lunnlew/dsh-wsl-desktop/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "lib",
+    "bin",
+    "README.md",
+    "locale",
+    "docs"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": []
+    }
+  },
+  "engines": {
+    "node": ">=22",
+    "dsh": ">=0.2.2-rc.5"
+  },
+  "scripts": {
+    "test": "node scripts/ci.mjs",
+    "ci": "node scripts/ci.mjs",
+    "prepack": "node scripts/ci.mjs"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.19.0",
+    "@electron/asar": "^4.0.1",
+    "yaml": "^2.8.1"
+  }
+}

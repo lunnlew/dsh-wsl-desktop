@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "WSL 桌面",
+    "description": "在 WSL 里运行 DSH Desktop：Windows 侧准备一份代理副本，窗口由 WSL 里的 Host 提供；副本里带终端标签和 WSL 侧状态。",
+    "detail": "docs/DETAIL.md"
+  }
+}

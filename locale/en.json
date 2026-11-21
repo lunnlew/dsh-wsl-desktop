@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "WSL desktop",
+    "description": "Run DSH Desktop on a WSL Host: the Windows side prepares a proxied copy whose window is served by the WSL Host, with shell tabs and WSL-side status.",
+    "detail": "docs/DETAIL.md"
+  }
+}

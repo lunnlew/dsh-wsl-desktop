@@ -1,0 +1,19 @@
+# Desktop shell -> WSL Host proxy installer (bundle patch: an operation list).
+# Automatic by default: on profile load it rebuilds the copy when missing or the
+# Desktop version changed, mirrors the enabled Windows plugins into the WSL web
+# profile, then launches the copy. Commands are the manual fallback.
+- insert:
+    - id: wsl-desktop
+      name: '@karoy/dsh-wsl-desktop'
+      config:
+        userDataDirName: 'DeepSeek Harness WSL'
+        port: 3080
+        distro: ''
+        autoInstall: true
+        mode: proxy
+        autoRun: true
+        autoSetup: true
+        autoLaunch: false
+        syncWslPlugins: true
+        syncLinked: false
+        autoDelayMs: 4000

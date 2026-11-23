@@ -70,6 +70,16 @@ while (!acquireLock()) {
   Atomics.wait(sleep, 0, 0, 3000)
 }
 
+/** Publish progress: `ok: null` means the run is still in flight. */
+const save = () => {
+  try {
+    writeStatus(config.installDir, { ok: null, steps: [...steps] })
+  } catch {
+    // a status write must never fail the run
+  }
+}
+save()
+
 try {
   const running = isCopyRunning(config)
   if (running) steps.push('copy already running')
@@ -78,34 +88,44 @@ try {
   const rebuild = config.autoSetup !== false && needsBuild(config)
   if (rebuild && running) {
     steps.push('rebuild deferred: copy is running (close it, or use /wsl-desktop-setup)')
+    save()
   } else if (rebuild) {
     steps.push('build: ' + config.installDir)
+    save()
     setup(config)
     steps.push('build done')
+    save()
   } else {
     steps.push('copy up to date')
+    save()
   }
 
   const shouldSync = config.syncWslPlugins !== false
   if (shouldSync) {
     steps.push(firstInit ? 'first-time sync' : 'sync enabled: reconciling WSL plugins')
+    save()
     const result = syncPlugins(config)
     steps.push('WSL plugins: +' + result.added.length + ' -' + result.removed.length + ' (failed ' + result.failed.length + ', skipped ' + result.skipped.length + ')')
+    save()
     const changed = result.added.length > 0 || result.removed.length > 0 || result.bundlesUpdated || result.bundlesDeactivated || result.configsMerged
     if (changed && running) {
       steps.push('synced; reopen the WSL window to load the new plugins')
+    save()
     } else if (changed) {
       if (restartAndVerify()) {
         steps.push('WSL Host reloaded with the synced plugins')
+    save()
       } else {
         removePlugins(result.added)
         stopWslHost()
         steps.push('WSL Host failed to boot with the synced plugins; rolled back ' + String(result.added.length))
+    save()
       }
     }
     markInitialized(config.installDir)
   } else {
     steps.push('sync disabled (syncWslPlugins off)')
+    save()
     if (firstInit) markInitialized(config.installDir)
   }
 
@@ -115,8 +135,10 @@ try {
     // window back to the foreground.
     const pid = spawnCopy(config)
     steps.push((running ? 'focused existing copy pid=' : 'launched pid=') + String(pid))
+    save()
   } else {
     steps.push('copy not started (start it from the button or /wsl-desktop-launch)')
+    save()
   }
 
   writeStatus(config.installDir, { ok: true, steps })

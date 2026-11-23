@@ -1,6 +1,6 @@
 {
   "name": "@karoy/dsh-wsl-desktop",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Install and launch a DSH Desktop copy whose Electron shell proxies its Host connection to a DSH Host running inside WSL",
   "keywords": [
     "dsh",

@@ -33,6 +33,10 @@ window.__ModuleLoader__.load({
 .dsh-wsl-desktop-badge .dsh-wsl-dot{flex:none;width:6px;height:6px;border-radius:50%;background:#2ea043;
   box-shadow:0 0 0 3px color-mix(in srgb,#2ea043 16%,transparent)}
 .dsh-wsl-desktop-badge .dsh-wsl-badge-label{overflow:hidden;text-overflow:ellipsis}
+.dsh-wsl-desktop-footer[data-state=busy]{cursor:progress;opacity:1}
+.dsh-wsl-desktop-footer[data-state=busy] svg{animation:dsh-wsl-spin 1.1s linear infinite;transform-origin:50% 50%}
+.dsh-wsl-desktop-footer .dsh-wsl-ellipsis{opacity:.55;font-size:11px;font-variant-numeric:tabular-nums}
+@keyframes dsh-wsl-spin{to{transform:rotate(360deg)}}
 `
 
     function DesktopIcon({ size = 15 }) {
@@ -45,11 +49,18 @@ window.__ModuleLoader__.load({
       h('path', { d: 'M4.4 5.2l1.8 1.5-1.8 1.5M7.8 8.2h2.6' }))
     }
 
-    /** Host state: `running` = the copy process is alive (a separate WSL window). */
+    /**
+     * Host state: `running` = the copy process is alive (a separate WSL window);
+     * `auto` = the last helper run (`{ ok: null | true | false, steps, error }`),
+     * where `ok === null` means the helper is still working.
+     */
     async function readState() {
       const res = await fetch('/wsl-desktop/state', { headers: { accept: 'application/json' } })
       const data = await res.json().catch(() => null)
-      return { running: data?.ok === true && data.running === true }
+      return {
+        running: data?.ok === true && data.running === true,
+        auto: data?.auto ?? null,
+      }
     }
 
     async function openDesktop() {
@@ -86,30 +97,67 @@ window.__ModuleLoader__.load({
     }
 
     function WslDesktopFooter({ wide }) {
-      const [state, setState] = React.useState('idle')
+      const [phase, setPhase] = React.useState('idle')
       const [detail, setDetail] = React.useState('')
-      const [copy, setCopy] = React.useState({ running: false })
+      const [copy, setCopy] = React.useState({ running: false, auto: null })
+      const [startedAt, setStartedAt] = React.useState(0)
+      const [now, setNow] = React.useState(Date.now())
       const mode = useMode()
 
-      const reveal = () => {
-        readState().then(setCopy, () => setCopy({ running: false }))
-      }
+      const reveal = React.useCallback(() => {
+        readState().then(setCopy, () => setCopy({ running: false, auto: null }))
+      }, [])
+
+      const auto = copy.auto
+      const autoAt = auto === null ? Number.NaN : Date.parse(String(auto.at ?? ''))
+      const autoFresh = !Number.isFinite(autoAt) ? true : Date.now() - autoAt < 15 * 60 * 1000
+      const preparing = !copy.running && (phase === 'preparing' || (auto?.ok === null && autoFresh))
 
       React.useEffect(() => {
         // The effect runs even when the render below returns the WSL badge, so
         // gate the copy poll on the platform: the WSL side has no such route.
         if (mode !== 'windows') return undefined
         reveal()
-        const timer = setInterval(reveal, 10000)
+        const timer = setInterval(reveal, preparing ? 1500 : 10000)
         const onFocus = () => reveal()
         window.addEventListener('focus', onFocus)
         return () => {
           clearInterval(timer)
           window.removeEventListener('focus', onFocus)
         }
-      }, [mode])
+      }, [mode, preparing, reveal])
 
-      const busy = state === 'busy'
+      React.useEffect(() => {
+        if (!preparing) return undefined
+        const tick = setInterval(() => setNow(Date.now()), 1000)
+        return () => clearInterval(tick)
+      }, [preparing])
+
+      React.useEffect(() => {
+        if (copy.running) {
+          setPhase('idle')
+          return
+        }
+        if (auto === null) return
+        const at = Date.parse(String(auto.at ?? ''))
+        const fresh = Number.isFinite(at) ? Date.now() - at < 15 * 60 * 1000 : true
+        if (auto.ok === false && fresh) {
+          setPhase('error')
+          setDetail(String(auto.error ?? '准备失败'))
+          return
+        }
+        if (auto.ok === true && phase !== 'idle') setPhase('idle')
+      }, [copy.running, auto, phase])
+
+      React.useEffect(() => {
+        if (phase !== 'preparing') return undefined
+        const timer = setTimeout(() => {
+          setPhase('error')
+          setDetail('准备超时（10 分钟）')
+        }, 10 * 60 * 1000)
+        return () => clearTimeout(timer)
+      }, [phase, startedAt])
+
       if (mode === 'wsl') {
         // The stylesheet is injected by the Windows footer otherwise; the badge
         // branch must bring its own copy or the class resolves to no styles.
@@ -124,37 +172,42 @@ window.__ModuleLoader__.load({
           wide ? h('span', { className: 'dsh-wsl-dot' }) : null,
           wide ? h('span', { className: 'dsh-wsl-badge-label' }, 'WSL 副本') : null))
       }
+
+      const elapsed = startedAt > 0 ? Math.max(0, Math.round((now - startedAt) / 1000)) : 0
+      const lastStep = Array.isArray(auto?.steps) && auto.steps.length > 0 ? auto.steps[auto.steps.length - 1] : ''
+      const busy = phase === 'preparing'
+
       const onClick = () => {
         if (busy) return
-        setState('busy')
+        setPhase('preparing')
         setDetail('')
+        setStartedAt(Date.now())
+        setNow(Date.now())
         openDesktop().then(
-          () => {
-            setState('idle')
-            setTimeout(reveal, 1500)
-          },
+          () => { setTimeout(reveal, 800) },
           (error) => {
             console.warn('[wsl-desktop]', error)
             setDetail(error instanceof Error ? error.message : String(error))
-            setState('error')
-            setTimeout(() => setState('idle'), 6000)
+            setPhase('error')
           },
         )
       }
 
       const label = copy.running
         ? 'WSL 窗口运行中'
-        : state === 'busy'
-          ? '准备中'
-          : state === 'error'
+        : phase === 'preparing'
+          ? '准备中…'
+          : phase === 'error'
             ? '启动失败'
             : '从WSL打开'
       const title = copy.running
         ? 'WSL 窗口已在运行，点击把它带到前台'
-        : state === 'error'
-          ? `启动失败：${detail}`
-          : '在 WSL 中打开 DSH 桌面窗口（另起副本；当前窗口不会切换）'
-      const buttonState = copy.running ? 'running' : state === 'error' ? 'error' : state
+        : phase === 'preparing'
+          ? '正在准备' + (lastStep === '' ? '' : '：' + lastStep) + '（已 ' + String(elapsed) + 's）'
+          : phase === 'error'
+            ? '启动失败：' + detail
+            : '在 WSL 中打开 DSH 桌面窗口（另起副本；当前窗口不会切换）'
+      const buttonState = copy.running ? 'running' : phase === 'error' ? 'error' : phase === 'preparing' ? 'busy' : 'idle'
 
       return h(React.Fragment, null,
         h('style', null, CSS),
@@ -164,10 +217,13 @@ window.__ModuleLoader__.load({
           'data-wide': wide ? 'true' : 'false',
           'data-state': buttonState,
           title,
-          'aria-label': title,
+          'aria-label': label + '：' + title,
           disabled: busy,
           onClick,
-        }, h(DesktopIcon, { size: 15 }), wide ? h('span', null, label) : null))
+        },
+        h(DesktopIcon, { size: 15 }),
+        wide ? h('span', null, label) : null,
+        phase === 'preparing' && wide ? h('span', { className: 'dsh-wsl-ellipsis' }, String(elapsed) + 's') : null))
     }
 
     const SETTINGS_CSS = `

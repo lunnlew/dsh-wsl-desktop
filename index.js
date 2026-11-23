@@ -291,9 +291,15 @@ export function apply(ctx, config = {}) {
       }
       if (req.method !== 'GET') return send(405, { ok: false, error: 'method not allowed' })
       try {
-        return send(200, { ok: true, running: copyRunning(cfg), wslMode: copyWslMode(cfg) })
+        return send(200, {
+          ok: true,
+          running: copyRunning(cfg),
+          wslMode: copyWslMode(cfg),
+          auto: readStatus(cfg.installDir),
+          needsBuild: needsBuild(cfg),
+        })
       } catch (error) {
-        return send(200, { ok: true, running: false, wslMode: false })
+        return send(200, { ok: true, running: false, wslMode: false, auto: null, needsBuild: true })
       }
     },
   }))
@@ -371,7 +377,7 @@ export function apply(ctx, config = {}) {
       if (req.headers['sec-fetch-site'] === 'cross-site') return send(403, { ok: false, error: 'cross-site request refused' })
       try {
         runHelper({ ...cfg, autoLaunch: true, syncWslPlugins: true })
-        return send(200, { ok: true })
+        return send(200, { ok: true, at: new Date().toISOString() })
       } catch (error) {
         return send(500, { ok: false, error: error instanceof Error ? error.message : String(error) })
       }

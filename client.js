@@ -37,6 +37,24 @@ window.__ModuleLoader__.load({
 .dsh-wsl-desktop-footer[data-state=busy] svg{animation:dsh-wsl-spin 1.1s linear infinite;transform-origin:50% 50%}
 .dsh-wsl-desktop-footer .dsh-wsl-ellipsis{opacity:.55;font-size:11px;font-variant-numeric:tabular-nums}
 @keyframes dsh-wsl-spin{to{transform:rotate(360deg)}}
+.dsh-wsl-target{position:fixed;z-index:80;width:300px;max-height:60vh;overflow:auto;padding:6px;border-radius:10px;
+  border:1px solid color-mix(in srgb,CanvasText 16%,transparent);background:Canvas;color:CanvasText;
+  box-shadow:0 12px 32px rgba(0,0,0,.22);font-size:12px}
+.dsh-wsl-target-head{display:flex;align-items:center;justify-content:space-between;padding:4px 8px;opacity:.65;
+  font-size:11px;letter-spacing:.02em;text-transform:uppercase}
+.dsh-wsl-target-refresh{border:none;background:transparent;color:inherit;cursor:pointer;font:inherit;font-size:11px;
+  padding:2px 6px;border-radius:4px;opacity:.9}
+.dsh-wsl-target-refresh:hover{background:color-mix(in srgb,CanvasText 10%,transparent)}
+.dsh-wsl-target-row{display:flex;align-items:center;gap:8px;width:100%;padding:6px 8px;border:none;border-radius:6px;
+  background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer;white-space:nowrap}
+.dsh-wsl-target-row[data-active=true]{background:color-mix(in srgb,CanvasText 10%,transparent)}
+.dsh-wsl-target-row:disabled{opacity:.5;cursor:default}
+.dsh-wsl-target-check{flex:none;width:14px;opacity:.9}
+.dsh-wsl-target-name{flex:1;overflow:hidden;text-overflow:ellipsis}
+.dsh-wsl-target-state{flex:none;font-size:10px;padding:1px 5px;border-radius:4px;
+  background:color-mix(in srgb,CanvasText 10%,transparent);opacity:.8}
+.dsh-wsl-target-empty{padding:8px;opacity:.6}
+.dsh-wsl-target-hint{padding:4px 8px;color:#c69026;font-size:11px;white-space:normal}
 `
 
     function DesktopIcon({ size = 15 }) {
@@ -102,6 +120,16 @@ window.__ModuleLoader__.load({
       const [copy, setCopy] = React.useState({ running: false, auto: null })
       const [startedAt, setStartedAt] = React.useState(0)
       const [now, setNow] = React.useState(Date.now())
+      const [menuOpen, setMenuOpen] = React.useState(false)
+      const [menuAnchor, setMenuAnchor] = React.useState(null)
+      const [distros, setDistros] = React.useState([])
+      const [currentDistro, setCurrentDistro] = React.useState('')
+      const [menuLoading, setMenuLoading] = React.useState(false)
+      const [menuError, setMenuError] = React.useState('')
+      const [menuHint, setMenuHint] = React.useState('')
+      const [active, setActive] = React.useState(0)
+      const buttonRef = React.useRef(null)
+      const menuRef = React.useRef(null)
       const mode = useMode()
 
       const reveal = React.useCallback(() => {
@@ -112,6 +140,78 @@ window.__ModuleLoader__.load({
       const autoAt = auto === null ? Number.NaN : Date.parse(String(auto.at ?? ''))
       const autoFresh = !Number.isFinite(autoAt) ? true : Date.now() - autoAt < 15 * 60 * 1000
       const preparing = !copy.running && (phase === 'preparing' || (auto?.ok === null && autoFresh))
+      const busy = phase === 'preparing'
+
+      const startPreparing = () => {
+        setPhase('preparing')
+        setDetail('')
+        setStartedAt(Date.now())
+        setNow(Date.now())
+      }
+
+      const items = [{ name: '', label: '默认发行版', state: '' }].concat(distros)
+
+      const loadDistros = () => {
+        setMenuLoading(true)
+        setMenuError('')
+        fetch('/wsl-desktop/distros', { headers: { accept: 'application/json' } })
+          .then((res) => res.json().catch(() => null))
+          .then((data) => {
+            if (data?.ok !== true) throw new Error(data?.error ?? '无法读取 WSL 发行版')
+            setDistros(Array.isArray(data.distros) ? data.distros : [])
+            setCurrentDistro(typeof data.current === 'string' ? data.current : '')
+            setActive(0)
+          })
+          .catch((error) => setMenuError(error instanceof Error ? error.message : String(error)))
+          .finally(() => setMenuLoading(false))
+      }
+
+      const openMenu = () => {
+        if (menuOpen) {
+          setMenuOpen(false)
+          return
+        }
+        const rect = buttonRef.current === null ? null : buttonRef.current.getBoundingClientRect()
+        if (rect !== null) {
+          const width = 300
+          setMenuAnchor({
+            left: Math.max(8, Math.min(rect.left, window.innerWidth - width - 8)),
+            bottom: Math.max(8, window.innerHeight - rect.top + 6),
+          })
+        }
+        setMenuOpen(true)
+        setMenuHint('')
+        loadDistros()
+      }
+
+      const openAsCurrent = (name) => {
+        if (copy.running && name !== currentDistro) {
+          setMenuHint('当前 WSL 窗口已打开：先关闭它，再切换目标')
+          return
+        }
+        setMenuOpen(false)
+        if (copy.running) {
+          openDesktop().catch((error) => console.warn('[wsl-desktop]', error))
+          return
+        }
+        startPreparing()
+        fetch('/wsl-desktop/select', {
+          method: 'POST',
+          headers: { accept: 'application/json', 'content-type': 'application/json' },
+          body: JSON.stringify({ distro: name }),
+        })
+          .then((res) => res.json().catch(() => null))
+          .then((data) => {
+            if (data?.ok !== true) throw new Error(data?.error ?? '切换目标失败')
+            setCurrentDistro(name)
+            setTimeout(reveal, 800)
+          })
+          .catch((error) => {
+            console.warn('[wsl-desktop]', error)
+            setDetail(error instanceof Error ? error.message : String(error))
+            setPhase('error')
+          })
+      }
 
       React.useEffect(() => {
         // The effect runs even when the render below returns the WSL badge, so
@@ -158,6 +258,38 @@ window.__ModuleLoader__.load({
         return () => clearTimeout(timer)
       }, [phase, startedAt])
 
+      React.useEffect(() => {
+        if (!menuOpen) return undefined
+        const onDown = (event) => {
+          if (menuRef.current !== null && menuRef.current.contains(event.target)) return
+          if (buttonRef.current !== null && buttonRef.current.contains(event.target)) return
+          setMenuOpen(false)
+        }
+        const onKey = (event) => {
+          if (event.key === 'Escape') {
+            setMenuOpen(false)
+            return
+          }
+          if (event.key === 'ArrowDown') {
+            event.preventDefault()
+            setActive((index) => Math.min(items.length - 1, index + 1))
+          } else if (event.key === 'ArrowUp') {
+            event.preventDefault()
+            setActive((index) => Math.max(0, index - 1))
+          } else if (event.key === 'Enter') {
+            event.preventDefault()
+            const item = items[active]
+            if (item !== undefined) openAsCurrent(item.name)
+          }
+        }
+        document.addEventListener('mousedown', onDown)
+        document.addEventListener('keydown', onKey)
+        return () => {
+          document.removeEventListener('mousedown', onDown)
+          document.removeEventListener('keydown', onKey)
+        }
+      }, [menuOpen, items, active])
+
       if (mode === 'wsl') {
         // The stylesheet is injected by the Windows footer otherwise; the badge
         // branch must bring its own copy or the class resolves to no styles.
@@ -175,14 +307,14 @@ window.__ModuleLoader__.load({
 
       const elapsed = startedAt > 0 ? Math.max(0, Math.round((now - startedAt) / 1000)) : 0
       const lastStep = Array.isArray(auto?.steps) && auto.steps.length > 0 ? auto.steps[auto.steps.length - 1] : ''
-      const busy = phase === 'preparing'
 
       const onClick = () => {
+        if (menuOpen) {
+          setMenuOpen(false)
+          return
+        }
         if (busy) return
-        setPhase('preparing')
-        setDetail('')
-        setStartedAt(Date.now())
-        setNow(Date.now())
+        startPreparing()
         openDesktop().then(
           () => { setTimeout(reveal, 800) },
           (error) => {
@@ -201,29 +333,78 @@ window.__ModuleLoader__.load({
             ? '启动失败'
             : '从WSL打开'
       const title = copy.running
-        ? 'WSL 窗口已在运行，点击把它带到前台'
+        ? '左键：把已打开的 WSL 窗口带到前台；右键：选择目标发行版'
         : phase === 'preparing'
-          ? '正在准备' + (lastStep === '' ? '' : '：' + lastStep) + '（已 ' + String(elapsed) + 's）'
+          ? '正在准备' + (lastStep === '' ? '' : '：' + lastStep) + '（已 ' + String(elapsed) + 's）；右键：选择目标发行版'
           : phase === 'error'
-            ? '启动失败：' + detail
-            : '在 WSL 中打开 DSH 桌面窗口（另起副本；当前窗口不会切换）'
+            ? '启动失败：' + detail + '；右键：选择目标发行版'
+            : '左键：在 WSL 中打开 DSH 桌面窗口；右键：选择目标发行版'
       const buttonState = copy.running ? 'running' : phase === 'error' ? 'error' : phase === 'preparing' ? 'busy' : 'idle'
+
+      const menu = menuOpen && menuAnchor !== null
+        ? h('div', {
+          className: 'dsh-wsl-target',
+          role: 'menu',
+          'aria-label': 'WSL 目标',
+          ref: menuRef,
+          style: { left: String(menuAnchor.left) + 'px', bottom: String(menuAnchor.bottom) + 'px' },
+        },
+        h('div', { className: 'dsh-wsl-target-head' },
+          h('span', null, 'WSL 目标'),
+          h('button', {
+            type: 'button',
+            className: 'dsh-wsl-target-refresh',
+            disabled: menuLoading,
+            onClick: loadDistros,
+          }, menuLoading ? '刷新中…' : '刷新')),
+        menuError === '' ? null : h('div', { className: 'dsh-wsl-target-empty' }, menuError),
+        menuLoading && distros.length === 0 ? h('div', { className: 'dsh-wsl-target-empty' }, '读取中…') : null,
+        ...items.map((item, index) => h('button', {
+          key: item.name === '' ? 'default' : item.name,
+          type: 'button',
+          role: 'menuitemradio',
+          'aria-checked': item.name === currentDistro,
+          className: 'dsh-wsl-target-row',
+          'data-active': index === active ? 'true' : 'false',
+          onMouseEnter: () => setActive(index),
+          onClick: () => openAsCurrent(item.name),
+        },
+        h('span', { className: 'dsh-wsl-target-check' }, item.name === currentDistro ? '✓' : ''),
+        h('span', { className: 'dsh-wsl-target-name' }, item.label ?? item.name),
+        item.state === '' || item.state === undefined ? null : h('span', { className: 'dsh-wsl-target-state' }, item.state),
+        item.default === true && item.name !== '' ? h('span', { className: 'dsh-wsl-target-state' }, '默认') : null)),
+        menuHint === '' ? null : h('div', { className: 'dsh-wsl-target-hint' }, menuHint))
+        : null
 
       return h(React.Fragment, null,
         h('style', null, CSS),
         h('button', {
           type: 'button',
+          ref: buttonRef,
           className: 'dsh-wsl-desktop-footer',
           'data-wide': wide ? 'true' : 'false',
           'data-state': buttonState,
+          'aria-haspopup': 'menu',
+          'aria-expanded': menuOpen,
           title,
           'aria-label': label + '：' + title,
           disabled: busy,
           onClick,
+          onContextMenu: (event) => {
+            event.preventDefault()
+            openMenu()
+          },
+          onKeyDown: (event) => {
+            if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+              event.preventDefault()
+              openMenu()
+            }
+          },
         },
         h(DesktopIcon, { size: 15 }),
         wide ? h('span', null, label) : null,
-        phase === 'preparing' && wide ? h('span', { className: 'dsh-wsl-ellipsis' }, String(elapsed) + 's') : null))
+        phase === 'preparing' && wide ? h('span', { className: 'dsh-wsl-ellipsis' }, String(elapsed) + 's') : null),
+        menu)
     }
 
     const SETTINGS_CSS = `

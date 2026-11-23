@@ -7,7 +7,7 @@
  *
  * @module @karoy/dsh-wsl-desktop
  */
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -125,6 +125,32 @@ function jsonResponse(res, status, body) {
   if (res.headersSent) return
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
   res.end(JSON.stringify(body))
+}
+
+/** Decode a wsl.exe buffer: WSL writes UTF-16LE on Windows. */
+function decodeWsl(buffer) {
+  const data = Buffer.isBuffer(buffer) ? buffer : Buffer.from(String(buffer ?? ''))
+  return data.toString('utf16le').replace(/^\uFEFF/, '')
+}
+
+/**
+ * Installed WSL distros from `wsl.exe -l -v` (`-l -q` fallback for old WSL).
+ * @returns Array<{ name, state, default }>.
+ */
+function listDistros() {
+  const detailed = spawnSync('wsl.exe', ['-l', '-v'], { maxBuffer: 4 * 1024 * 1024, windowsHide: true })
+  const rows = []
+  for (const line of decodeWsl(detailed.stdout).split(/\r?\n/)) {
+    const match = /^(\*)?\s*(\S+)\s+(\S+)\s+(\d+)\s*$/.exec(line)
+    if (match !== null) rows.push({ name: match[2], state: match[3], default: match[1] === '*' })
+  }
+  if (rows.length > 0) return rows
+  const plain = spawnSync('wsl.exe', ['-l', '-q'], { maxBuffer: 4 * 1024 * 1024, windowsHide: true })
+  return decodeWsl(plain.stdout)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((name) => name !== '')
+    .map((name) => ({ name, state: 'unknown', default: false }))
 }
 
 /** The port this Host was started with (`--port N` in its argv). */
@@ -301,6 +327,49 @@ export function apply(ctx, config = {}) {
       } catch (error) {
         return send(200, { ok: true, running: false, wslMode: false, auto: null, needsBuild: true })
       }
+    },
+  }))
+
+  ctx.effect(() => ctx.webServer.register({
+    kind: 'exact',
+    path: '/wsl-desktop/distros',
+    handler: (req, res) => {
+      if (req.method !== 'GET') return jsonResponse(res, 405, { ok: false, error: 'method not allowed' })
+      try {
+        const current = resolveConfig(config).distro ?? ''
+        const distros = listDistros().map((distro) => ({ ...distro, current: distro.name === current }))
+        return jsonResponse(res, 200, { ok: true, current, distros })
+      } catch (error) {
+        return jsonResponse(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) })
+      }
+    },
+  }))
+
+  ctx.effect(() => ctx.webServer.register({
+    kind: 'exact',
+    path: '/wsl-desktop/select',
+    handler: (req, res) => {
+      if (req.method !== 'POST') return jsonResponse(res, 405, { ok: false, error: 'method not allowed' })
+      if (req.headers['sec-fetch-site'] === 'cross-site') return jsonResponse(res, 403, { ok: false, error: 'cross-site request refused' })
+      readJsonBody(req).then(async (body) => {
+        try {
+          const distro = typeof body?.distro === 'string' ? body.distro.trim() : null
+          if (distro === null) return jsonResponse(res, 400, { ok: false, error: 'distro must be a string' })
+          if (distro !== '' && !listDistros().some((item) => item.name === distro)) {
+            return jsonResponse(res, 400, { ok: false, error: 'unknown WSL distro: ' + distro })
+          }
+          const editor = ctx.get('configEditor')
+          const entry = ctx.fiber?.entry
+          if (editor === undefined || entry === undefined) {
+            return jsonResponse(res, 501, { ok: false, error: 'config editor unavailable in this profile' })
+          }
+          await editor.edit(entry, (current) => ({ ...(current ?? {}), distro }))
+          runHelper({ ...resolveConfig(config), distro, autoLaunch: true, syncWslPlugins: true })
+          return jsonResponse(res, 200, { ok: true, at: new Date().toISOString() })
+        } catch (error) {
+          return jsonResponse(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) })
+        }
+      }, (error) => jsonResponse(res, 400, { ok: false, error: error instanceof Error ? error.message : String(error) }))
     },
   }))
 

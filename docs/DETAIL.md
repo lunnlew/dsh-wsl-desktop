@@ -24,6 +24,20 @@
    - WSL：`/wsl-desktop/wsl-state`、`/wsl-desktop/wsl-shell`，页脚是只读徽标，设置页显示
      Host pid/端口、`.env`/凭据、终端 bundle 状态。
 
+## 入口与目标选择
+
+左下角入口是一个目标感知的按钮：
+
+- **左键**：按当前目标准备并打开副本；没有切换过时当前目标就是默认发行版（`distro` 为空）。
+- **右键 / ContextMenu / Shift+F10**：弹出 WSL 目标列表（`wsl.exe -l -v`，老 WSL 退化 `-l -q`），
+  包含「默认发行版」与各发行版的状态、当前勾选和默认标记；列表可刷新，Esc / 点外部关闭，
+  ↑↓/Enter 键盘可达。
+- **选择一行**：持久化 `distro` → 触发一次打开 → 状态机进入「准备中」。副本窗口已打开时不静默切换，
+  会提示先关闭窗口。
+
+切换目标不需要重建副本：`distro` 通过 `DSH_WSL_DISTRO` 传给副本的 `wsl-remote.cjs`
+（`wsl.exe -d <distro>`）。
+
 ## 插件同步
 
 `syncWslPlugins`（默认开）在每次启动/打开窗口时把 Windows desktop profile 的插件镜像到 WSL：
